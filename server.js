@@ -3,21 +3,14 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 const dotenv = require("dotenv");
 const path = require("path");
+const fs = require("fs");
 
 // Load environment variables
 dotenv.config();
 
-// Import routes
-const authRoutes = require("./routes/auth");
-const qrRoutes = require("./routes/qr");
-const attendanceRoutes = require("./routes/attendance");
-const institutionRoutes = require("./routes/institution");
-const studentRoutes = require("./routes/student");
-const teacherRoutes = require("./routes/teacher");
-
 const app = express();
 
-// ========== MIDDLEWARE ==========
+// ========== BASIC MIDDLEWARE SETUP FIRST ==========
 
 // Request logging
 app.use((req, res, next) => {
@@ -41,16 +34,8 @@ app.use(cors({
   allowedHeaders: ["Content-Type", "Authorization"],
   credentials: true
 }));
-app.options("*", cors({
-  origin: [
-    "http://localhost:3000",
-    "http://localhost:5173",
-    "https://qr-frontend-henna.vercel.app"
-  ],
-  methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true
-}));
+
+app.options("*", cors());
 
 // Body parsers
 app.use(express.json({ limit: "10mb" }));
@@ -64,14 +49,12 @@ app.use("/uploads", express.static(path.join(__dirname, "uploads")));
 const connectDB = async () => {
   try {
     const mongoURI = process.env.MONGODB_URI || "mongodb://localhost:27017/qr-attendance";
-    console.log(`🔌 Connecting to MongoDB: ${mongoURI}`);
+    console.log(`🔌 Attempting MongoDB connection...`);
     
-    // ✅ FIXED: Removed deprecated options
     await mongoose.connect(mongoURI);
     
     console.log("✅ MongoDB connected successfully");
     
-    // Connection events
     mongoose.connection.on('error', (err) => {
       console.error('❌ MongoDB connection error:', err);
     });
@@ -86,9 +69,10 @@ const connectDB = async () => {
   }
 };
 
+// Initialize database connection
 connectDB();
 
-// ========== TEST ENDPOINTS ==========
+// ========== BASIC TEST ENDPOINTS (No dependencies) ==========
 
 // Simple test endpoint
 app.get("/api/test", (req, res) => {
@@ -96,22 +80,104 @@ app.get("/api/test", (req, res) => {
   res.json({
     success: true,
     message: "Backend is working!",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    database: mongoose.connection.readyState === 1 ? "connected" : "disconnected"
   });
 });
 
-// Test registration endpoint
+// Health check endpoint
+app.get("/health", (req, res) => {
+  const dbStatus = mongoose.connection.readyState;
+  const dbConnected = dbStatus === 1;
+  
+  res.status(200).json({
+    status: "OK",
+    timestamp: new Date().toISOString(),
+    database: {
+      status: dbConnected ? "connected" : "disconnected",
+      connected: dbConnected
+    },
+    uptime: process.uptime(),
+    memory: process.memoryUsage()
+  });
+});
+
+// Root endpoint
+app.get("/", (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: "QR Attendance Backend is running 🚀",
+    endpoints: {
+      health: "GET /health",
+      test: "GET /api/test",
+      docs: "API documentation coming soon"
+    }
+  });
+});
+
+// ========== DYNAMIC ROUTE LOADING WITH ERROR HANDLING ==========
+
+// Function to safely load routes
+const loadRoute = (routePath, routeName) => {
+  try {
+    if (fs.existsSync(routePath)) {
+      const routeModule = require(routePath);
+      console.log(`✅ Loaded ${routeName} route module`);
+      return routeModule;
+    } else {
+      console.warn(`⚠️ ${routeName} route file not found at ${routePath}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ Error loading ${routeName} route:`, error.message);
+    return null;
+  }
+};
+
+// Define routes with fallbacks
+const routes = [
+  { path: "./routes/auth", name: "auth", endpoint: "/api/auth" },
+  { path: "./routes/qr", name: "qr", endpoint: "/api/qr" },
+  { path: "./routes/attendance", name: "attendance", endpoint: "/api/attendance" },
+  { path: "./routes/institution", name: "institution", endpoint: "/api/institution" },
+  { path: "./routes/student", name: "student", endpoint: "/api/students" },
+  { path: "./routes/teacher", name: "teacher", endpoint: "/api/teachers" }
+];
+
+console.log("\n📋 Setting up routes...");
+
+// Load and apply routes
+routes.forEach(route => {
+  const routeModule = loadRoute(route.path, route.name);
+  if (routeModule) {
+    app.use(route.endpoint, routeModule);
+    console.log(`   ✅ ${route.name} route mounted at ${route.endpoint}`);
+  } else {
+    // Create a basic route as fallback
+    console.log(`   ⚠️ Creating fallback route for ${route.endpoint}`);
+    app.use(route.endpoint, (req, res) => {
+      res.status(501).json({
+        success: false,
+        message: `${route.name} route module is not available`,
+        endpoint: `${req.method} ${req.originalUrl}`
+      });
+    });
+  }
+});
+
+// ========== REGISTRATION ENDPOINTS WITH FALLBACK ==========
+
+// Test registration endpoint (works without database)
 app.post("/api/test-register", async (req, res) => {
   console.log("✅ /api/test-register endpoint hit");
   
   try {
-    const data = req.body;
-    console.log("📦 Request data:", data);
+    const { name, email, role = "student", institutionCode = "TEST001" } = req.body;
     
-    if (!data.name || !data.email) {
+    if (!name || !email) {
       return res.status(400).json({ 
         success: false,
-        error: "Missing required fields"
+        error: "Missing required fields: name and email"
       });
     }
 
@@ -121,11 +187,12 @@ app.post("/api/test-register", async (req, res) => {
       data: {
         user: {
           id: "test_" + Date.now(),
-          name: data.name,
-          email: data.email,
-          role: data.role || "student",
-          institutionCode: data.institutionCode || "TEST001",
-          createdAt: new Date().toISOString()
+          name,
+          email,
+          role,
+          institutionCode,
+          createdAt: new Date().toISOString(),
+          note: "This is a test registration. Real routes may not be loaded."
         }
       }
     });
@@ -140,58 +207,23 @@ app.post("/api/test-register", async (req, res) => {
   }
 });
 
-// ========== ROUTES SETUP ==========
-
-console.log("📋 Setting up routes...");
-
-// Check if routes exist
-console.log("🔍 Checking route modules...");
-console.log("   authRoutes:", typeof authRoutes);
-console.log("   teacherRoutes:", typeof teacherRoutes);
-console.log("   studentRoutes:", typeof studentRoutes);
-
-// Apply routes
-app.use("/api/auth", authRoutes);
-app.use("/api/qr", qrRoutes);
-app.use("/api/attendance", attendanceRoutes);
-app.use("/api/institution", institutionRoutes);
-app.use("/api/students", studentRoutes);
-app.use("/api/teachers", teacherRoutes);
-
-console.log("✅ All routes applied");
-
-// ========== BASIC ENDPOINTS ==========
-
-app.get("/health", (req, res) => {
-  const dbStatus = mongoose.connection.readyState;
-  const dbConnected = dbStatus === 1;
-  
-  res.status(200).json({
-    status: "OK",
-    timestamp: new Date().toISOString(),
-    database: {
-      status: dbConnected ? "connected" : "disconnected",
-      connected: dbConnected
-    },
-    uptime: process.uptime()
+// Fallback student registration
+app.post("/api/students/register", (req, res) => {
+  res.status(501).json({
+    success: false,
+    message: "Student registration route is not loaded. Using test endpoint instead.",
+    alternative: "POST /api/test-register with {name, email, role: 'student'}",
+    documentation: "Check if student routes are properly configured"
   });
 });
 
-app.get("/", (req, res) => {
-  res.status(200).json({
-    success: true,
-    message: "QR Attendance Backend is running 🚀",
-    endpoints: {
-      health: "GET /health",
-      test: "GET /api/test",
-      testRegister: "POST /api/test-register",
-      students: {
-        register: "POST /api/students/register"
-      },
-      teachers: {
-        register: "POST /api/teachers/register"
-      }
-    }
+// Fallback teacher registration
+app.post("/api/teachers/register", (req, res) => {
+  res.status(501).json({
+    success: false,
+    message: "Teacher registration route is not loaded. Using test endpoint instead.",
+    alternative: "POST /api/test-register with {name, email, role: 'teacher'}",
+    documentation: "Check if teacher routes are properly configured"
   });
 });
 
@@ -202,18 +234,28 @@ app.use((req, res) => {
   console.log(`❌ 404: ${req.method} ${req.originalUrl}`);
   res.status(404).json({
     success: false,
-    error: "Endpoint not found"
+    error: "Endpoint not found",
+    requested: `${req.method} ${req.originalUrl}`,
+    availableEndpoints: [
+      "GET /",
+      "GET /health",
+      "GET /api/test",
+      "POST /api/test-register",
+      "POST /api/students/register",
+      "POST /api/teachers/register"
+    ]
   });
 });
 
 // Global error handler
 app.use((err, req, res, next) => {
-  console.error("🚨 Error:", err.message);
+  console.error("🚨 Global error handler:", err.message);
+  console.error("Stack:", err.stack);
   
   res.status(500).json({
     success: false,
     error: "Internal server error",
-    details: process.env.NODE_ENV === "development" ? err.message : undefined
+    message: process.env.NODE_ENV === "development" ? err.message : "Something went wrong"
   });
 });
 
@@ -221,16 +263,21 @@ app.use((err, req, res, next) => {
 
 const PORT = process.env.PORT || 5000;
 
+// Check for required environment variables
+if (!process.env.MONGODB_URI) {
+  console.warn("⚠️ MONGODB_URI not found in environment variables");
+  console.warn("⚠️ Using default: mongodb://localhost:27017/qr-attendance");
+}
+
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`\n🚀 ========== SERVER STARTED ==========`);
   console.log(`✅ Server running on port ${PORT}`);
   console.log(`🌐 Local: http://localhost:${PORT}`);
   console.log(`🔗 Health check: http://localhost:${PORT}/health`);
   console.log(`🧪 Test endpoint: GET http://localhost:${PORT}/api/test`);
-  console.log(`👨‍🎓 Student register: POST http://localhost:${PORT}/api/students/register`);
-  console.log(`👨‍🏫 Teacher register: POST http://localhost:${PORT}/api/teachers/register`);
+  console.log(`📝 Test register: POST http://localhost:${PORT}/api/test-register`);
   console.log(`====================================\n`);
 });
 
-// ✅ ADD THIS FOR RENDER.COM
+// Export for Render.com / Vercel
 module.exports = app;
