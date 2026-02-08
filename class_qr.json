@@ -1,0 +1,8 @@
+﻿{
+    "note":  "Students scan this QR to mark attendance",
+    "class":  "10th",
+    "subject":  "Mathematics",
+    "generatedAt":  "2026-02-08 07:11:38",
+    "qrToken":  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzZXNzaW9uSWQiOiIzZTRhMzk5Yzk4NmFlZmY1MDU0OWFhZjRlMWU5MGRjNCIsInRlYWNoZXJJZCI6IjY5ODY3Y2Q3ZGEyNGM1NDFlNTc3MTRhMyIsInRlYWNoZXJOYW1lIjoic2FnYXIgcGFuZGV5Iiwic3ViamVjdCI6Ik1hdGhlbWF0aWNzIiwiY2xhc3MiOiIxMHRoIiwic2VjdGlvbiI6IiIsInBlcmlvZCI6MSwiaW5zdGl0dXRpb25Db2RlIjoiSU5TVC1NM0tZMjgiLCJ0aW1lc3RhbXAiOjE3NzA1MTQ4OTgwNTYsImlhdCI6MTc3MDUxNDg5OCwiZXhwIjoxNzcwNTE1MTk4fQ.CM2-_kKiJCo8P0yPAN6W2aoZKPbwlgRUPRA1HMp0Fqg",
+    "period":  1
+}
